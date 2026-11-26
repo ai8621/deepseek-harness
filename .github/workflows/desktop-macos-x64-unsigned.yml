@@ -99,10 +99,9 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          root=apps/desktop/.desktop-build/unsigned-artifacts
+          root=apps/desktop/.desktop-build/targets/mac-x64/unsigned-artifacts
           echo "artifacts root: $root"
           ls -la "$root" 2>/dev/null || true
-          find "$root" -maxdepth 2 -name '*.dmg' -o -maxdepth 2 -name '*.zip' -o -maxdepth 2 -name '*.yml' -o -maxdepth 2 -name '*.blockmap' 2>/dev/null | sort || true
           app="$root/mac/DeepSeek Harness.app"
           if [ -d "$app" ]; then
             file "$app/Contents/MacOS/DeepSeek Harness" || true
@@ -115,23 +114,23 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: dsh-desktop-macos-x64-unsigned-dmg
-          path: apps/desktop/.desktop-build/unsigned-artifacts/*.dmg
+          path: apps/desktop/.desktop-build/targets/mac-x64/unsigned-artifacts/*.dmg
           archive: false
           if-no-files-found: error
           retention-days: 14
           overwrite: true
 
-      - name: Upload update ZIP
+      - name: Upload update ZIP and channel metadata
         if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: dsh-desktop-macos-x64-unsigned-zip
           path: |
-            apps/desktop/.desktop-build/unsigned-artifacts/*.zip
-            apps/desktop/.desktop-build/unsigned-artifacts/*.blockmap
-            apps/desktop/.desktop-build/unsigned-artifacts/*.yml
+            apps/desktop/.desktop-build/targets/mac-x64/unsigned-artifacts/*.zip
+            apps/desktop/.desktop-build/targets/mac-x64/unsigned-artifacts/*.blockmap
+            apps/desktop/.desktop-build/targets/mac-x64/unsigned-artifacts/*.yml
           archive: false
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
           overwrite: true
 
