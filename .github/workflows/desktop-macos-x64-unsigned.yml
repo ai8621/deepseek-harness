@@ -1,0 +1,146 @@
+# Build the DeepSeek Harness Desktop application for macOS Intel (x64) on a
+# GitHub-hosted Intel runner, then keep the installers as workflow artifacts.
+#
+# This lane uses the repository's own local-packaging entry point
+# (`package-target.ts mac-x64 --unsigned`), which is the documented way to
+# produce a locally installable Desktop build without Apple Developer ID
+# signing or notarization credentials. The resulting `.app` carries an ad-hoc
+# signature and the DMG/ZIP are unnotarized, so macOS Gatekeeper must be told
+# to allow this one application on the machine that installs it.
+name: Desktop · macOS Intel · unsigned
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Source ref to build (branch or tag). Empty builds the dispatched ref.'
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-x64-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI runs must never report to the production telemetry endpoint.
+  DSH_TELEMETRY_DISABLED: '1'
+  CI: '1'
+  DSH_DESKTOP_TARGET_PLATFORM: darwin
+  DSH_DESKTOP_TARGET_ARCH: x64
+
+jobs:
+  package:
+    name: package mac-x64 (unsigned)
+    runs-on: macos-15-intel
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+        id: checkout
+        with:
+          ref: ${{ inputs.source_ref || github.ref_name }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '^24.22.3'
+          cache: pnpm
+
+      - name: Report host, toolchain and disk
+        run: |
+          set -euo pipefail
+          uname -a
+          sw_vers
+          node --version
+          node -p 'process.platform + "/" + process.arch'
+          pnpm --version
+          xcode-select -p
+          xcodebuild -version || true
+          df -h /
+
+      - name: Assert an Intel host
+        run: |
+          set -euo pipefail
+          [ "$(node -p 'process.arch')" = x64 ] || {
+            echo "::error::This lane must run on an x64 host so the packaged Electron runtime is native Intel"; exit 1;
+          }
+
+      - name: Install locked dependencies
+        # node-gyp fetches Node headers from nodejs.org during install; bounded
+        # retries mirror the repository's own install policy.
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then exit 0; fi
+            [ "$attempt" -lt 3 ] && sleep 10
+          done
+          exit 1
+
+      - name: Preflight packaging configuration and toolchain
+        run: pnpm exec tsx apps/desktop/scripts/package-target.ts mac-x64 --unsigned --check
+
+      - name: Build unsigned Desktop installers
+        run: pnpm exec tsx apps/desktop/scripts/package-target.ts mac-x64 --unsigned
+
+      - name: Inspect produced artifacts
+        if: always()
+        run: |
+          set -uo pipefail
+          root=apps/desktop/.desktop-build/unsigned-artifacts
+          echo "artifacts root: $root"
+          ls -la "$root" 2>/dev/null || true
+          find "$root" -maxdepth 2 -name '*.dmg' -o -maxdepth 2 -name '*.zip' -o -maxdepth 2 -name '*.yml' -o -maxdepth 2 -name '*.blockmap' 2>/dev/null | sort || true
+          app="$root/mac/DeepSeek Harness.app"
+          if [ -d "$app" ]; then
+            file "$app/Contents/MacOS/DeepSeek Harness" || true
+            codesign -dvv "$app" 2>&1 | head -12 || true
+            du -sh "$app" || true
+          fi
+
+      - name: Upload DMG installer
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dsh-desktop-macos-x64-unsigned-dmg
+          path: apps/desktop/.desktop-build/unsigned-artifacts/*.dmg
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: Upload update ZIP
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dsh-desktop-macos-x64-unsigned-zip
+          path: |
+            apps/desktop/.desktop-build/unsigned-artifacts/*.zip
+            apps/desktop/.desktop-build/unsigned-artifacts/*.blockmap
+            apps/desktop/.desktop-build/unsigned-artifacts/*.yml
+          archive: false
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
+      - name: Retain packaging diagnostics
+        continue-on-error: true
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dsh-desktop-macos-x64-unsigned-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          path: apps/desktop/.desktop-build/packaging-runs/
+          if-no-files-found: warn
+          retention-days: 14
