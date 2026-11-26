@@ -95,7 +95,9 @@ export const Config: z<Partial<Config>, Config> = z.object({
   outputDirectory: z.string().min(1).default(dshHomePath('office-kit', 'outputs')),
   outputRetentionMs: z.natural().min(1).max(2_147_483_647).default(24 * 60 * 60 * 1000),
   maxOutputStoreBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER).default(512 * 1024 * 1024),
-  timeoutMs: z.natural().min(1).max(2_147_483_647).default(60_000),
+  // LibreOffice builds its user profile and font cache on first use, which exceeds a
+  // minute on small hosted macOS runners; the default must fit a cold first conversion.
+  timeoutMs: z.natural().min(1).max(2_147_483_647).default(300_000),
   maxInputBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER - 1).default(50 * 1024 * 1024),
   maxOutputBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER - 1).default(100 * 1024 * 1024),
   maxImageResolution: z.natural().min(1).max(2_147_483_647).default(192),
